@@ -1,0 +1,9 @@
+
+
+this
+
+
+- reads in the data to the terminal
+- applies a user defined function to the cells/cells
+- applies a change to a subset and tests them
+- imports changes isnto databases
