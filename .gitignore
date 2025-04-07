@@ -2,4 +2,3 @@ venv/
 notes
 docker-compose.yaml
 .env
-app.py
