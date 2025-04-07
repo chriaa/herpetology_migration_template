@@ -2,3 +2,5 @@ venv/
 notes
 docker-compose.yaml
 .env
+output/*
+!output/.gitkeep

@@ -1,16 +1,18 @@
 
+from datetime import datetime
 import pyodbc
 import os
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
+import pandas as pd
 
 load_dotenv()
 
 print(pyodbc.drivers)
 
 
-def connect_to_db(prefix):
+def connect_to_db(prefix) -> Engine:
     host = os.getenv(f"{prefix}_DB_HOST")
     port = os.getenv(f"{prefix}_DB_PORT", 3306)
     database = os.getenv(f"{prefix}_DB_DATABASE")
@@ -27,8 +29,14 @@ def connect_to_db(prefix):
     return engine
 
 
-def fetch_data(engine: Engine, table_fields: list[dict]) -> dict:
+def fetch_data(engine: Engine, table_fields: list[dict], manual_query : str = 0) -> dict:
     data = {}
+
+    if(manual_query): # If you want to write your own queries s
+        with engine.connect() as conn:
+            results = conn.execute(text(manual_query)).fetchall()
+            return [dict(row._mapping) for row in results]
+
     with engine.connect() as conn:
         for entry in table_fields:
             table = entry['table']
@@ -39,17 +47,18 @@ def fetch_data(engine: Engine, table_fields: list[dict]) -> dict:
                 'fields': fields,
                 'rows': [dict(row._mapping) for row in results]
             }
+
     return data
 
 #Implement with pyspark
-def apply_transformations(table: str, data: list[dict]) -> list[dict]:
+def apply_transformations( data: list[dict]) -> list[dict]:
     transformed = []
 
     for row in data:
         new_row = row.copy()
-        if 'catno' in row and isinstance(row['catno'], int):
-            new_row['catno'] = row['catno'] + 1  # Example logic
-        # Add other transformations as needed per field/table
+        if 'LocalAnnotation' in row: # NOTE: add better handling to ensure output type is maintained
+            new_row['LocalAnnotation'] = 'this is a test'  # Example logic
+        
         transformed.append(new_row)
 
     return transformed
@@ -76,29 +85,27 @@ def export_transformed_data(engine: Engine, export_config: list[dict], transform
                 conn.execute(query, row)
 
 
-def export_transformed_data_to_file(transformed_batches: dict, output_dir='output', file_type='xlsx'):
+def export_transformed_data_to_file(transformed_batches: list[dict], output_dir='output', file_type='xlsx') -> None:
+    """
+    exports the transformed batches into an excel spreadsheet
+    
+    NOTE: this should be expanded to accomodate for changes spanning multiple fields across multiple tables such that 
+    there is a new sheet for every new table effected
+    """
     os.makedirs(output_dir, exist_ok=True)
+    
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_path = os.path.join(output_dir, f"transformed_data_{timestamp}.xlsx")
 
-    if file_type == 'xlsx':
-        output_path = os.path.join(output_dir, f"transformed_data_{timestamp}.xlsx")
-        with pd.ExcelWriter(output_path, engine='xlsxwriter') as writer:
-            for table_name, rows in transformed_batches.items():
-                if rows:
-                    df = pd.DataFrame(rows)
-                    df.to_excel(writer, sheet_name=table_name[:31], index=False)  # Excel sheet names max 31 chars
-        print(f"[✓] Exported all tables to Excel file: {output_path}")
+    if not transformed_batches:
+        print("No data to export.")
+        return
 
-    elif file_type == 'csv':
-        for table_name, rows in transformed_batches.items():
-            if rows:
-                df = pd.DataFrame(rows)
-                file_name = f"{table_name.replace('.', '_')}_{timestamp}.csv"
-                csv_path = os.path.join(output_dir, file_name)
-                df.to_csv(csv_path, index=False)
-                print(f"[✓] Exported {table_name} to CSV: {csv_path}")
-    else:
-        raise ValueError("file_type must be 'xlsx' or 'csv'")
+    df = pd.DataFrame(transformed_batches)
+    with pd.ExcelWriter(output_path, engine='xlsxwriter') as writer:
+        df.to_excel(writer, sheet_name="TransformedData", index=False)
+
+    print(f"[✓] Exported data to Excel file: {output_path}")
     
 
 
@@ -107,15 +114,24 @@ def main():
     source_conn = connect_to_db('HERP')
     target_conn = connect_to_db('SPECIFY')
     source_table_fields = [
-        {'table': 'herp_rbase.MAINCAT', 'fields': ['id', 'catno']},
-        {'table': 'herp_rbase.LOCALITY', 'fields': ['id', 'locname']}
+        {'table': 'herp_rbase.MAINCAT', 'fields': ['id', 'catno']}
     ]
 
-    target_config = [
-    ]
+    # grabs data from source
+    raw_data = fetch_data(source_conn, source_table_fields, manual_query='SELECT * from herp_rbase.MAINCAT limit 10;')
 
-    print("Fetching source data...")
-    raw_data = fetch_data(source_conn, source_table_fields)
+    # define your own transformations within the apply_transformations function
+    transformed_batches = apply_transformations(raw_data)
+
+    '''
+    for i in transformed_batches:
+        print(i)
+    '''
+    # export into an xlsx 
+    export_transformed_data_to_file(transformed_batches=transformed_batches)
+
+    
+
 
 
 
